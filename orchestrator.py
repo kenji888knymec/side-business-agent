@@ -8,6 +8,8 @@ import concurrent.futures
 
 client = anthropic.Anthropic()
 
+MODEL = "claude-opus-4-6"
+
 # ========== 各エージェントの指示 ==========
 
 AGENTS = {
@@ -111,12 +113,14 @@ AGENTS = {
 def run_agent(agent_name: str, prompt: str) -> str:
     """単一エージェントを実行する"""
     print(f"▶ {agent_name} 起動中...")
-    response = client.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=2000,
+    with client.messages.stream(
+        model=MODEL,
+        max_tokens=4000,
+        thinking={"type": "adaptive"},
         messages=[{"role": "user", "content": prompt}]
-    )
-    result = response.content[0].text
+    ) as stream:
+        final = stream.get_final_message()
+    result = next(b.text for b in final.content if b.type == "text")
     print(f"✅ {agent_name} 完了")
     return result
 
