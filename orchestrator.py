@@ -3,12 +3,8 @@
 各エージェントを独立したサブエージェントとして並列実行する
 """
 
-import anthropic
-import concurrent.futures
-
-client = anthropic.Anthropic()
-
-MODEL = "claude-opus-4-6"
+import anyio
+from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage
 
 # ========== 各エージェントの指示 ==========
 
@@ -110,62 +106,64 @@ AGENTS = {
 }
 
 
-def run_agent(agent_name: str, prompt: str) -> str:
-    """単一エージェントを実行する"""
+async def run_agent(agent_name: str, prompt: str) -> str:
+    """単一エージェントを非同期実行する"""
     print(f"▶ {agent_name} 起動中...")
-    with client.messages.stream(
-        model=MODEL,
-        max_tokens=4000,
-        thinking={"type": "adaptive"},
-        messages=[{"role": "user", "content": prompt}]
-    ) as stream:
-        final = stream.get_final_message()
-    result = next(b.text for b in final.content if b.type == "text")
+    result = ""
+    async for message in query(
+        prompt=prompt,
+        options=ClaudeAgentOptions(
+            model="claude-opus-4-6",
+            allowed_tools=[],
+            max_turns=3,
+        )
+    ):
+        if isinstance(message, ResultMessage):
+            result = message.result
     print(f"✅ {agent_name} 完了")
     return result
 
 
-def orchestrate(theme: str):
+async def orchestrate(theme: str):
     """全エージェントをオーケストレートして最終結果を返す"""
 
     print(f"\n副業戦略チーム起動 テーマ：{theme}\n")
 
     # Phase 1：A・B・C 並列調査
     print("Phase 1：A・B・C 並列調査中...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {
-            executor.submit(run_agent, "A_twitter", AGENTS["A_twitter"].format(theme=theme)): "A_twitter",
-            executor.submit(run_agent, "B_instagram", AGENTS["B_instagram"].format(theme=theme)): "B_instagram",
-            executor.submit(run_agent, "C_market", AGENTS["C_market"].format(theme=theme)): "C_market",
-        }
-        research = {}
-        for future in concurrent.futures.as_completed(futures):
-            name = futures[future]
-            research[name] = future.result()
+    research = {}
+
+    async def collect(name, prompt):
+        research[name] = await run_agent(name, prompt)
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(collect, "A_twitter",   AGENTS["A_twitter"].format(theme=theme))
+        tg.start_soon(collect, "B_instagram", AGENTS["B_instagram"].format(theme=theme))
+        tg.start_soon(collect, "C_market",    AGENTS["C_market"].format(theme=theme))
 
     research_summary = "\n\n".join([f"【{k}】\n{v}" for k, v in research.items()])
 
     # Phase 2：D 戦略立案
     print("\nPhase 2：D 戦略立案中...")
-    strategy = run_agent("D_strategy", AGENTS["D_strategy"].format(research_results=research_summary))
+    strategy = await run_agent("D_strategy", AGENTS["D_strategy"].format(research_results=research_summary))
 
     # Phase 3：E マーケティング
     print("\nPhase 3：E マーケティング中...")
-    marketing = run_agent("E_marketing", AGENTS["E_marketing"].format(strategy=strategy))
+    marketing = await run_agent("E_marketing", AGENTS["E_marketing"].format(strategy=strategy))
 
     # Phase 4：F 批判
     print("\nPhase 4：F 批判中...")
-    criticism = run_agent("F_critic", AGENTS["F_critic"].format(proposals=f"{strategy}\n{marketing}"))
+    criticism = await run_agent("F_critic", AGENTS["F_critic"].format(proposals=f"{strategy}\n{marketing}"))
 
     # Phase 5：G まとめ
     print("\nPhase 5：G まとめ中...")
     all_results = f"調査：{research_summary}\n戦略：{strategy}\nマーケ：{marketing}\n批判：{criticism}"
-    final = run_agent("G_summary", AGENTS["G_summary"].format(all_results=all_results))
+    final = await run_agent("G_summary", AGENTS["G_summary"].format(all_results=all_results))
 
     print("\n✅ 全エージェント完了\n")
-    print("="*60)
+    print("=" * 60)
     print("【最終提案】")
-    print("="*60)
+    print("=" * 60)
     print(final)
 
     return final
@@ -173,4 +171,4 @@ def orchestrate(theme: str):
 
 if __name__ == "__main__":
     theme = input("副業テーマを入力してください：")
-    orchestrate(theme)
+    anyio.run(orchestrate, theme)
