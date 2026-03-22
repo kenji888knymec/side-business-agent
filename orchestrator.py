@@ -3,15 +3,9 @@
 各エージェントを独立したサブエージェントとして並列実行する
 """
 
-import os
-import sys
 import anyio
 from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage
 
-if not os.environ.get("ANTHROPIC_API_KEY"):
-    print("エラー：ANTHROPIC_API_KEY が設定されていません。")
-    print("実行前に export ANTHROPIC_API_KEY=sk-... を設定してください。")
-    sys.exit(1)
 
 # ========== 各エージェントの指示 ==========
 
